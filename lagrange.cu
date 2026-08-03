@@ -31,6 +31,7 @@ __global__ void lagrangeGPU(
     shared_vals[my_lane] = 0.0f;
     if(0 < my_i && my_i < n)
     {
+        float my_x = a + my_i * h;
         //TODO
     }
 
