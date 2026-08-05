@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <iostream>
 #include <cuda_runtime.h>
 #define _USE_MATH_DEFINES
@@ -15,6 +16,7 @@ __global__ void lagrangeGPU(
     const float a,
     const float b,
     const float h,
+    const float x_input,
     const int n,
     float* lag
 )
@@ -25,6 +27,7 @@ __global__ void lagrangeGPU(
     int my_i = blockDim.x * blockIdx.x + threadIdx.x;
     int my_warp = threadIdx.x / WARPSZ;
     int my_lane = threadIdx.x % WARPSZ;
+
     float* shared_vals = thread_calcs + my_warp * WARPSZ;
     float blk_result = 0.0;
 
@@ -32,11 +35,21 @@ __global__ void lagrangeGPU(
     if(0 < my_i && my_i < n)
     {
         float my_x = a + my_i * h;
-        //TODO
+        for (int k = 1; k < n; k++) {
+            if (k != my_x) {
+                
+            }        
+        }
+        
     }
 
     printf("Hello from GPU! Block %d Thread %d\n",
            blockIdx.x, threadIdx.x);
+}
+
+__device__ float Lagrange_base(float &x_input, float &x_lag, float &x_thread)
+{
+    return (x_input - x_thread ) / (x_lag - x_thread);
 }
 
 __device__ float U(float x)
@@ -48,7 +61,8 @@ void Get_args(
     const int argc,
     char* argv[],
     int* slice_num,
-    int* input_flag
+    int* input_flag,
+    int* x_input
 )
 {
     if(argc != 5)
@@ -58,6 +72,7 @@ void Get_args(
     }
 
     *slice_num = strtol(argv[1], NULL, 10);
+    *x_input = strtol(argv[2], NULL, 10);
     
     if(*slice_num > MAX_BLKSZ)
     {
@@ -79,12 +94,12 @@ int main(int argc,char* argv[])
     float a = 0;
     float b = acos(-1.0);
     int input_flag = 1;
-    float* lag_res;
+    float* lag_res, x_input;
 
 
     h = (b - a) / (slice_num - 1);
     
-    Get_args(argc, argv, &slice_num, &input_flag);
+    Get_args(argc, argv, &slice_num, &input_flag, &x_input);
     if(input_flag == 0)
     {
         return 1;
@@ -92,7 +107,7 @@ int main(int argc,char* argv[])
 
     cudaMallocManaged(&lag_res, sizeof(float));
 
-    lagrangeGPU<<<BLOCK_COUNT, MAX_BLKSZ>>>(a, b, h, slice_num, lag_res);
+    lagrangeGPU<<<BLOCK_COUNT, MAX_BLKSZ>>>(a, b, h, *x_input, slice_num, lag_res);
 
     cudaError_t err = cudaDeviceSynchronize();
 
