@@ -12,6 +12,16 @@ nvcc lagrange.cu -o lagrange
 #define WARPSZ 32
 #define BLOCK_COUNT 32
 
+__device__ float Shared_mem_sum(float* shared_vals)
+{
+    return 0.0;
+}
+
+__device__ float U(float x)
+{
+    return sin(x);
+}
+
 __global__ void lagrangeGPU(
     const float a,
     const float b,
@@ -22,17 +32,11 @@ __global__ void lagrangeGPU(
     float* d_lag_based_arr_p
 )
 {
-    // __shared__ float thread_calcs[MAX_BLKSZ];
-    // __shared__ float warp_multi_arr[WARPSZ];
+    __shared__ float thread_calcs[MAX_BLKSZ];
+    __shared__ float warp_sum_arr[WARPSZ];
 
     int my_i = blockDim.x * blockIdx.x + threadIdx.x;
-    // int my_warp = threadIdx.x / WARPSZ;
-    // int my_lane = threadIdx.x % WARPSZ;
 
-    // float* shared_vals = thread_calcs + my_warp * WARPSZ;
-    // float blk_result = 0.0;
-
-    // shared_vals[my_lane] = 1.0f;
     if(my_i < n)
     {
         float my_x = a + my_i * h;
@@ -45,14 +49,36 @@ __global__ void lagrangeGPU(
         }
         d_lag_based_arr_p[my_i] = li;
     }
-
     // printf("Hello from GPU! Block %d Thread %d Lagrange_based_calculated %f \n",
-    //        blockIdx.x, threadIdx.x, d_lag_based_arr_p[my_i]);
-}
+    //        blockIdx.x, threadIdx.x, d_lag_based_arr_p[my_i]);                                                          
+    __syncthreads();
 
-__device__ float U(float x)
-{
-    return sin(x);
+    int my_warp = threadIdx.x / WARPSZ;
+    int my_lane = threadIdx.x % WARPSZ;
+
+    float* shared_vals = thread_calcs + my_warp * WARPSZ;
+    float blk_result = 0.0;
+
+    shared_vals[my_lane] = 0.0f;
+    
+    if(my_i < n)
+    {
+        float my_x = a + my_i * h;
+        float my_y = U(my_x);
+        shared_vals[my_lane] = my_y * d_lag_based_arr_p[my_i];
+    }
+    float my_result = Shared_mem_sum(shared_vals);
+    if(my_lane == 0) warp_sum_arr[my_warp] = my_result;
+    __syncthreads();
+
+    if(my_warp == 0)
+    {
+        if(threadIdx.x >= blockDim.x / WARPSZ)
+            warp_sum_arr[threadIdx.x] = 0.0;
+        blk_result = Shared_mem_sum(warp_sum_arr);
+    }
+
+    if(threadIdx.x == 0) atomicAdd(lag, blk_result);
 }
 
 void Get_args(
