@@ -12,11 +12,11 @@ nvcc lagrange.cu -o lagrange
 #define WARPSZ 32
 #define BLOCK_COUNT 32
 
-__device__ float Shared_mem_sum(float* shared_vals)
+__device__ float Shared_mem_sum(float shared_vals[])
 {
     int my_lane = threadIdx.x % warpSize;
 
-    for(int diff == warpSize / 2; diff > 0; diff = diff / 2)
+    for(int diff = warpSize / 2; diff > 0; diff = diff / 2)
     {
         int source = (my_lane + diff) % warpSize;
         shared_vals[my_lane] += shared_vals[source];
@@ -26,7 +26,8 @@ __device__ float Shared_mem_sum(float* shared_vals)
 
 __device__ float U(float x)
 {
-    return sin(x);
+    // return sin(x);
+    return x;
 }
 
 __global__ void lagrangeGPU(
@@ -67,12 +68,15 @@ __global__ void lagrangeGPU(
     float blk_result = 0.0;
 
     shared_vals[my_lane] = 0.0f;
+
+    printf("result %f\n", d_lag_based_arr_p[my_i]); 
     
     if(my_i < n)
     {
         float my_x = a + my_i * h;
         float my_y = U(my_x);
         shared_vals[my_lane] = my_y * d_lag_based_arr_p[my_i];
+        
     }
     float my_result = Shared_mem_sum(shared_vals);
     if(my_lane == 0) warp_sum_arr[my_warp] = my_result;
@@ -82,10 +86,12 @@ __global__ void lagrangeGPU(
     {
         if(threadIdx.x >= blockDim.x / WARPSZ)
             warp_sum_arr[threadIdx.x] = 0.0;
-        blk_result = Shared_mem_sum(warp_sum_arr);
+        blk_result = Shared_mem_sum(warp_sum_arr); 
     }
 
-    if(threadIdx.x == 0) atomicAdd(lag, blk_result);
+    if(threadIdx.x == 0){
+      atomicAdd(lag, blk_result);
+    } 
 }
 
 void Get_args(
@@ -145,10 +151,12 @@ int main(int argc,char* argv[])
 
     cudaError_t err = cudaDeviceSynchronize();
     
-    for(int k = 0; k < slice_num; k++)
-    {
-        printf("L[%d] = %f \n", k, d_lag_based_arr_p[k]);
-    }
+    // for(int k = 0; k < slice_num; k++)
+    // {
+    //     printf("L[%d] = %f \n", k, d_lag_based_arr_p[k]);
+    // }
+
+    // printf("result %f\n", *lag_res);
 
     if (err != cudaSuccess)
     {
