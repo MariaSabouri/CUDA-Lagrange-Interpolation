@@ -14,7 +14,14 @@ nvcc lagrange.cu -o lagrange
 
 __device__ float Shared_mem_sum(float* shared_vals)
 {
-    return 0.0;
+    int my_lane = threadIdx.x % warpSize;
+
+    for(int diff == warpSize / 2; diff > 0; diff = diff / 2)
+    {
+        int source = (my_lane + diff) % warpSize;
+        shared_vals[my_lane] += shared_vals[source];
+    }
+    return shared_vals[my_lane];
 }
 
 __device__ float U(float x)
