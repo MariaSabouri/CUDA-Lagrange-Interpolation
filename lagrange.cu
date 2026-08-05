@@ -18,38 +18,36 @@ __global__ void lagrangeGPU(
     const float h,
     const float x_input,
     const int n,
-    float* lag
+    float* lag,
+    float* d_lag_based_arr_p
 )
 {
-    __shared__ float thread_calcs[MAX_BLKSZ];
-    __shared__ float warp_multi_arr[WARPSZ];
+    // __shared__ float thread_calcs[MAX_BLKSZ];
+    // __shared__ float warp_multi_arr[WARPSZ];
 
     int my_i = blockDim.x * blockIdx.x + threadIdx.x;
-    int my_warp = threadIdx.x / WARPSZ;
-    int my_lane = threadIdx.x % WARPSZ;
+    // int my_warp = threadIdx.x / WARPSZ;
+    // int my_lane = threadIdx.x % WARPSZ;
 
-    float* shared_vals = thread_calcs + my_warp * WARPSZ;
-    float blk_result = 0.0;
+    // float* shared_vals = thread_calcs + my_warp * WARPSZ;
+    // float blk_result = 0.0;
 
-    shared_vals[my_lane] = 0.0f;
-    if(0 < my_i && my_i < n)
+    // shared_vals[my_lane] = 1.0f;
+    if(my_i < n)
     {
         float my_x = a + my_i * h;
+        float li = 1.0f;
         for (int k = 1; k < n; k++) {
-            if (k != my_x) {
-                
+            if (k != my_i) {
+                float x_k = a + k * h;
+                li *= (x_input - x_k) / (my_x - x_k);
             }        
         }
-        
+        d_lag_based_arr_p[my_i] = li;
     }
 
-    printf("Hello from GPU! Block %d Thread %d\n",
-           blockIdx.x, threadIdx.x);
-}
-
-__device__ float Lagrange_base(float &x_input, float &x_lag, float &x_thread)
-{
-    return (x_input - x_thread ) / (x_lag - x_thread);
+    // printf("Hello from GPU! Block %d Thread %d Lagrange_based_calculated %f \n",
+    //        blockIdx.x, threadIdx.x, d_lag_based_arr_p[my_i]);
 }
 
 __device__ float U(float x)
@@ -62,10 +60,10 @@ void Get_args(
     char* argv[],
     int* slice_num,
     int* input_flag,
-    int* x_input
+    float* x_input
 )
 {
-    if(argc != 5)
+    if(argc != 3)
     {
         *input_flag = 0;
         printf("An error message\n");
@@ -94,10 +92,9 @@ int main(int argc,char* argv[])
     float a = 0;
     float b = acos(-1.0);
     int input_flag = 1;
-    float* lag_res, x_input;
-
-
-    h = (b - a) / (slice_num - 1);
+    float* lag_res;
+    float x_input;
+    float* d_lag_based_arr_p;
     
     Get_args(argc, argv, &slice_num, &input_flag, &x_input);
     if(input_flag == 0)
@@ -105,11 +102,20 @@ int main(int argc,char* argv[])
         return 1;
     }
 
+    h = (b - a) / (slice_num - 1);
+    // printf("a: %f, b:%f h: %f \n", a, b, h);
+
+    cudaMallocManaged(&d_lag_based_arr_p, slice_num* sizeof(float));
     cudaMallocManaged(&lag_res, sizeof(float));
 
-    lagrangeGPU<<<BLOCK_COUNT, MAX_BLKSZ>>>(a, b, h, *x_input, slice_num, lag_res);
+    lagrangeGPU<<<BLOCK_COUNT, MAX_BLKSZ>>>(a, b, h, x_input, slice_num, lag_res, d_lag_based_arr_p);
 
     cudaError_t err = cudaDeviceSynchronize();
+    
+    for(int k = 0; k < slice_num; k++)
+    {
+        printf("L[%d] = %f \n", k, d_lag_based_arr_p[k]);
+    }
 
     if (err != cudaSuccess)
     {
