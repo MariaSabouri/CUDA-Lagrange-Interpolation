@@ -44,6 +44,13 @@ __global__ void lagrangeGPU(
     __shared__ float warp_sum_arr[WARPSZ];
 
     int my_i = blockDim.x * blockIdx.x + threadIdx.x;
+    int my_warp = threadIdx.x / WARPSZ;
+    int my_lane = threadIdx.x % WARPSZ;
+
+    float* shared_vals = thread_calcs + my_warp * WARPSZ;
+    float blk_result = 0.0;
+
+    shared_vals[my_lane] = 0.0f;
 
     if(my_i < n)
     {
@@ -56,28 +63,13 @@ __global__ void lagrangeGPU(
             }        
         }
         d_lag_based_arr_p[my_i] = li;
+        float my_y = U(my_x);
+        shared_vals[my_lane] = my_y * d_lag_based_arr_p[my_i];
+
     }
     // printf("Hello from GPU! Block %d Thread %d Lagrange_based_calculated %f \n",
     //        blockIdx.x, threadIdx.x, d_lag_based_arr_p[my_i]);                                                          
-    __syncthreads();
-
-    int my_warp = threadIdx.x / WARPSZ;
-    int my_lane = threadIdx.x % WARPSZ;
-
-    float* shared_vals = thread_calcs + my_warp * WARPSZ;
-    float blk_result = 0.0;
-
-    shared_vals[my_lane] = 0.0f;
-
-    printf("result %f\n", d_lag_based_arr_p[my_i]); 
     
-    if(my_i < n)
-    {
-        float my_x = a + my_i * h;
-        float my_y = U(my_x);
-        shared_vals[my_lane] = my_y * d_lag_based_arr_p[my_i];
-        
-    }
     float my_result = Shared_mem_sum(shared_vals);
     if(my_lane == 0) warp_sum_arr[my_warp] = my_result;
     __syncthreads();
@@ -106,6 +98,7 @@ void Get_args(
     {
         *input_flag = 0;
         printf("An error message\n");
+        return;
     }
 
     *slice_num = strtol(argv[1], NULL, 10);
@@ -115,6 +108,7 @@ void Get_args(
     {
         *input_flag = 0;
         printf("An error message\n");
+        return;
     }
 }
 
@@ -134,6 +128,8 @@ int main(int argc,char* argv[])
     float* lag_res;
     float x_input;
     float* d_lag_based_arr_p;
+
+    *lag_res = 0.0f;
     
     Get_args(argc, argv, &slice_num, &input_flag, &x_input);
     if(input_flag == 0)
@@ -156,7 +152,7 @@ int main(int argc,char* argv[])
     //     printf("L[%d] = %f \n", k, d_lag_based_arr_p[k]);
     // }
 
-    // printf("result %f\n", *lag_res);
+    printf("result %f\n", *lag_res);
 
     if (err != cudaSuccess)
     {
