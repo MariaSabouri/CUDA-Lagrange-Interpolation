@@ -56,7 +56,7 @@ __global__ void lagrangeGPU(
     {
         float my_x = a + my_i * h;
         float li = 1.0f;
-        for (int k = 1; k < n; k++) {
+        for (int k = 0; k < n; k++) {
             if (k != my_i) {
                 float x_k = a + k * h;
                 li *= (x_input - x_k) / (my_x - x_k);
@@ -102,7 +102,7 @@ void Get_args(
     }
 
     *slice_num = strtol(argv[1], NULL, 10);
-    *x_input = strtol(argv[2], NULL, 10);
+    *x_input = strtof(argv[2], NULL);
     
     if(*slice_num > MAX_BLKSZ)
     {
@@ -128,8 +128,6 @@ int main(int argc,char* argv[])
     float* lag_res;
     float x_input;
     float* d_lag_based_arr_p;
-
-    *lag_res = 0.0f;
     
     Get_args(argc, argv, &slice_num, &input_flag, &x_input);
     if(input_flag == 0)
@@ -142,6 +140,7 @@ int main(int argc,char* argv[])
 
     cudaMallocManaged(&d_lag_based_arr_p, slice_num* sizeof(float));
     cudaMallocManaged(&lag_res, sizeof(float));
+    cudaMemset(lag_res, 0, sizeof(float));
 
     lagrangeGPU<<<BLOCK_COUNT, MAX_BLKSZ>>>(a, b, h, x_input, slice_num, lag_res, d_lag_based_arr_p);
 
