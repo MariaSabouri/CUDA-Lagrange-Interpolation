@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <cmath>
+#include <chrono>
 
 /*
 g++ serial_lagrange.cpp -o serial_lagrange
@@ -98,11 +99,18 @@ int main(int argc,char* argv[])
     h = (b - a) / (slice_num - 1);
     
     float* lag_res = new float[query_num];
+
+    auto start = std::chrono::high_resolution_clock::now();
     lagrange(a, slice_num, query_num, h, query_h, lag_res);
+    auto end = std::chrono::high_resolution_clock::now();
+
+    std::chrono::duration<double, std::micro> elapsed = end - start;
+
     for (int i = 0; i < query_num; ++i)
     {
         printf("lag[%d] = %f\n",i,lag_res[i]);
     }
+    printf("Execution time: %f us\n", elapsed.count());
     
 /* 
     std::vector<float> lag_res(query_num);
