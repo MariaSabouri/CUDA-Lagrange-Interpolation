@@ -9,19 +9,19 @@ nvcc lagrange.cu -o lagrange
 */
 
 #define MAX_BLKSZ 1024
-#define WARPSZ 32
-#define BLOCK_COUNT 32
-
 __device__ float Shared_mem_sum(float shared_vals[])
 {
     int my_lane = threadIdx.x % warpSize;
 
     for(int diff = warpSize / 2; diff > 0; diff = diff / 2)
     {
-        int source = (my_lane + diff) % warpSize;
-        shared_vals[my_lane] += shared_vals[source];
+        if (my_lane < diff)
+        {
+            shared_vals[my_lane] += shared_vals[my_lane + diff];
+        }
+        __syncwarp();
     }
-    return shared_vals[my_lane];
+    return shared_vals[0];
 }
 
 __device__ float U(float x)
@@ -32,43 +32,44 @@ __device__ float U(float x)
 
 __global__ void lagrangeGPU(
     const float a,
-    const float b,
     const float h,
-    const float x_input,
+    const float query_h,
     const int n,
-    float* lag,
-    float* d_lag_based_arr_p
+    float* lag
 )
 {
     __shared__ float thread_calcs[MAX_BLKSZ];
-    __shared__ float warp_sum_arr[WARPSZ];
+    __shared__ float warp_sum_arr[warpSize];
 
-    int my_i = blockDim.x * blockIdx.x + threadIdx.x;
-    int my_warp = threadIdx.x / WARPSZ;
-    int my_lane = threadIdx.x % WARPSZ;
+    int query_i = blockIdx.x;
+    int my_i = threadIdx.x;
+    int my_warp = threadIdx.x / warpSize;
+    int my_lane = threadIdx.x % warpSize;
 
-    float* shared_vals = thread_calcs + my_warp * WARPSZ;
+    float* shared_vals = thread_calcs + my_warp * warpSize;
     float blk_result = 0.0;
 
     shared_vals[my_lane] = 0.0f;
 
-    if(my_i < n)
+    if (my_i < n)
     {
         float my_x = a + my_i * h;
         float li = 1.0f;
-        for (int k = 0; k < n; k++) {
-            if (k != my_i) {
-                float x_k = a + k * h;
-                li *= (x_input - x_k) / (my_x - x_k);
-            }        
-        }
-        d_lag_based_arr_p[my_i] = li;
-        float my_y = U(my_x);
-        shared_vals[my_lane] = my_y * d_lag_based_arr_p[my_i];
 
-    }
-    // printf("Hello from GPU! Block %d Thread %d Lagrange_based_calculated %f \n",
-    //        blockIdx.x, threadIdx.x, d_lag_based_arr_p[my_i]);                                                          
+        for (int k = 0; k < n; k++)
+        {
+            if (k != my_i)
+            {
+                float x_k = a + k * h;
+                float x_input = a + query_i * query_h;
+
+                li *= (x_input - x_k) / (my_x - x_k);
+            }
+        }
+
+        float my_y = U(my_x);
+        shared_vals[my_lane] = my_y * li;
+    }                                                
     
     float my_result = Shared_mem_sum(shared_vals);
     if(my_lane == 0) warp_sum_arr[my_warp] = my_result;
@@ -76,22 +77,22 @@ __global__ void lagrangeGPU(
 
     if(my_warp == 0)
     {
-        if(threadIdx.x >= blockDim.x / WARPSZ)
+        if(threadIdx.x >= (blockDim.x + warpSize - 1) / warpSize)
             warp_sum_arr[threadIdx.x] = 0.0;
         blk_result = Shared_mem_sum(warp_sum_arr); 
     }
 
     if(threadIdx.x == 0){
-      atomicAdd(lag, blk_result);
+      lag[query_i] = blk_result;
     } 
 }
 
 void Get_args(
     const int argc,
     char* argv[],
-    int* slice_num,
+    int& slice_num,
     int* input_flag,
-    float* x_input
+    int& query_num
 )
 {
     if(argc != 3)
@@ -101,13 +102,20 @@ void Get_args(
         return;
     }
 
-    *slice_num = strtol(argv[1], NULL, 10);
-    *x_input = strtof(argv[2], NULL);
+    slice_num = strtol(argv[1], NULL, 10);
+    query_num = strtol(argv[2], NULL, 10);
     
-    if(*slice_num > MAX_BLKSZ)
+    if(slice_num < 2 || slice_num > MAX_BLKSZ)
     {
         *input_flag = 0;
-        printf("An error message\n");
+        printf("slice_num must be between 2 and %d\n", MAX_BLKSZ);
+        return;
+    }
+
+    if(query_num < 2)
+    {
+        *input_flag = 0;
+        printf("query_num must be at least 2\n");
         return;
     }
 }
@@ -120,42 +128,52 @@ int main(int argc,char* argv[])
     std::cout << "Compute Capability: "
               << prop.major << "." << prop.minor << std::endl;
 
-    int slice_num;
+    int slice_num, query_num;
     float h;
     float a = 0;
     float b = acos(-1.0);
     int input_flag = 1;
     float* lag_res;
-    float x_input;
-    float* d_lag_based_arr_p;
     
-    Get_args(argc, argv, &slice_num, &input_flag, &x_input);
+    Get_args(argc, argv, slice_num, &input_flag, &query_num);
     if(input_flag == 0)
     {
         return 1;
     }
 
+    float query_h = (b - a) / (query_num - 1);
+
     h = (b - a) / (slice_num - 1);
-    // printf("a: %f, b:%f h: %f \n", a, b, h);
 
-    cudaMallocManaged(&d_lag_based_arr_p, slice_num* sizeof(float));
-    cudaMallocManaged(&lag_res, sizeof(float));
-    cudaMemset(lag_res, 0, sizeof(float));
+    cudaMallocManaged(&lag_res, query_num * sizeof(float));
+    cudaMemset(lag_res, 0, query_num * sizeof(float));
+    /*
+    query_num  → number of blocks 
+    threads_per_block  → number of threads per block = blockDim.x
+    */
+    int threads_per_block = ((slice_num + 31) / 32) * 32;
+    lagrangeGPU<<<query_num, threads_per_block>>>(a, h, query_h, slice_num, lag_res);
 
-    lagrangeGPU<<<BLOCK_COUNT, MAX_BLKSZ>>>(a, b, h, x_input, slice_num, lag_res, d_lag_based_arr_p);
-
-    cudaError_t err = cudaDeviceSynchronize();
-    
-    // for(int k = 0; k < slice_num; k++)
-    // {
-    //     printf("L[%d] = %f \n", k, d_lag_based_arr_p[k]);
-    // }
-
-    printf("result %f\n", *lag_res);
+    cudaError_t err = cudaGetLastError();
 
     if (err != cudaSuccess)
     {
-        std::cerr << cudaGetErrorString(err) << std::endl;
+        std::cerr << "Kernel launch error: "
+                << cudaGetErrorString(err) << std::endl;
+        return 1;
+    }
+
+    err = cudaDeviceSynchronize();
+
+    for (int i = 0; i < query_num; i++)
+    {
+        printf("P(x[%d]) = %f\n", i, lag_res[i]);
+    }
+
+    if (err != cudaSuccess)
+    {
+        std::cerr << "Kernel execution error: "
+                << cudaGetErrorString(err) << std::endl;
         return 1;
     }
     return 0;
