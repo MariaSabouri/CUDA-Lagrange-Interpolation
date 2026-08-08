@@ -9,6 +9,7 @@ nvcc lagrange.cu -o lagrange
 */
 
 #define MAX_BLKSZ 1024
+#define WARP_SZ 32
 __device__ float Shared_mem_sum(float shared_vals[])
 {
     int my_lane = threadIdx.x % warpSize;
@@ -39,7 +40,7 @@ __global__ void lagrangeGPU(
 )
 {
     __shared__ float thread_calcs[MAX_BLKSZ];
-    __shared__ float warp_sum_arr[warpSize];
+    __shared__ float warp_sum_arr[WARP_SZ];
 
     int query_i = blockIdx.x;
     int my_i = threadIdx.x;
@@ -135,7 +136,7 @@ int main(int argc,char* argv[])
     int input_flag = 1;
     float* lag_res;
     
-    Get_args(argc, argv, slice_num, &input_flag, &query_num);
+    Get_args(argc, argv, slice_num, &input_flag, query_num);
     if(input_flag == 0)
     {
         return 1;
