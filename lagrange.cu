@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
+
 /*
 nvcc lagrange.cu -o lagrange
 ./lagrange
@@ -27,8 +28,8 @@ __device__ float Shared_mem_sum(float shared_vals[])
 
 __device__ float U(float x)
 {
-    // return sin(x);
-    return x;
+    return sin(x);
+    // return x;
 }
 
 __global__ void lagrangeGPU(
@@ -130,11 +131,12 @@ int main(int argc,char* argv[])
               << prop.major << "." << prop.minor << std::endl;
 
     int slice_num, query_num;
-    float h;
+    float h, query_h;
     float a = 0;
     float b = acos(-1.0);
     int input_flag = 1;
     float* lag_res;
+    cudaEvent_t start, stop;
     
     Get_args(argc, argv, slice_num, &input_flag, query_num);
     if(input_flag == 0)
@@ -142,7 +144,7 @@ int main(int argc,char* argv[])
         return 1;
     }
 
-    float query_h = (b - a) / (query_num - 1);
+    query_h = (b - a) / (query_num - 1);
 
     h = (b - a) / (slice_num - 1);
 
@@ -153,10 +155,24 @@ int main(int argc,char* argv[])
     threads_per_block  → number of threads per block = blockDim.x
     */
     int threads_per_block = ((slice_num + 31) / 32) * 32;
+
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+
     lagrangeGPU<<<query_num, threads_per_block>>>(a, h, query_h, slice_num, lag_res);
 
-    cudaError_t err = cudaGetLastError();
+    cudaEventRecord(stop);
 
+    cudaEventSynchronize(stop);
+    
+    float milliseconds;
+    
+    cudaError_t err = cudaGetLastError();
+    
+    err = cudaDeviceSynchronize();
+    
     if (err != cudaSuccess)
     {
         std::cerr << "Kernel launch error: "
@@ -164,12 +180,21 @@ int main(int argc,char* argv[])
         return 1;
     }
 
-    err = cudaDeviceSynchronize();
-
+    cudaEventElapsedTime(
+    &milliseconds,
+    start,
+    stop
+    );
+    
     for (int i = 0; i < query_num; i++)
     {
         printf("P(x[%d]) = %f\n", i, lag_res[i]);
     }
+
+    printf("CUDA kernel time: %f ms\n", milliseconds);
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
 
     if (err != cudaSuccess)
     {

@@ -44,8 +44,8 @@ void Get_args(
 
 float U(float x)
 {
-    // return sin(x);
-    return x;
+    return sin(x);
+    // return x;
 }
 
 void lagrange(
