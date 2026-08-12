@@ -2,12 +2,50 @@
 #include <vector>
 #include <cmath>
 #include <chrono>
+#include <stdio.h>
 
 /*
 g++ serial_lagrange.cpp -o serial_lagrange
 ./serial_lagrange
 */
 
+void save_results(
+    int slice_number,
+    int block_size,
+    int query_num,
+    double elapsed,
+    double mean_error,
+    const char* version
+)
+{
+    FILE *fp = fopen("result.csv", "a");
+
+    if (fp == NULL)
+    {
+        perror("Error opening file");
+        return;
+    }
+
+    fseek(fp, 0, SEEK_END);
+
+    if (ftell(fp) == 0)
+    {
+        fprintf(fp,
+            "slice_number,block_size,query_num,elapsed,mean_error,version\n");
+    }
+
+    fprintf(fp,
+        "%d,%d,,%d,%.6f,%.10e,%s\n",
+        block_size,
+        slice_number,
+        query_num,
+        elapsed,
+        mean_error,
+        version
+    );
+
+    fclose(fp);
+}
 
 void Get_args(
     const int argc,
@@ -54,7 +92,8 @@ void lagrange(
     const int query_n,
     const float h,
     const float query_h,
-    float* result
+    float* result,
+    float& mean_lag_error
 )
 {
     for(int q = 0; q < query_n; ++q)
@@ -78,7 +117,9 @@ void lagrange(
             float y_i = U(x_i);
             result[q] += y_i * basis;
         }
+        mean_lag_error += abs(result[q] - U(x_value));
     }
+    mean_lag_error /= query_n;
 }
 
 int main(int argc,char* argv[])
@@ -87,6 +128,7 @@ int main(int argc,char* argv[])
     float h, query_h;
     float a = 0;
     float b = acos(-1.0);
+    float mean_lag_error = 0;
     int input_flag = 1;
 
     Get_args(argc, argv, slice_num, &input_flag, query_num);
@@ -101,7 +143,7 @@ int main(int argc,char* argv[])
     float* lag_res = new float[query_num];
 
     auto start = std::chrono::high_resolution_clock::now();
-    lagrange(a, slice_num, query_num, h, query_h, lag_res);
+    lagrange(a, slice_num, query_num, h, query_h, lag_res, mean_lag_error);
     auto end = std::chrono::high_resolution_clock::now();
 
     std::chrono::duration<double, std::micro> elapsed = end - start;
@@ -111,6 +153,15 @@ int main(int argc,char* argv[])
         printf("lag[%d] = %f\n",i,lag_res[i]);
     }
     printf("Execution time: %f us\n", elapsed.count());
+    printf("mean_error: %f \n", mean_lag_error);
+
+    save_results(
+    slice_num,
+    0,
+    query_num,
+    elapsed.count(),
+    mean_lag_error,
+    "Serial");
     
 /* 
     std::vector<float> lag_res(query_num);

@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #define _USE_MATH_DEFINES
 #include <math.h>
+#include <stdio.h>
 
 /*
 nvcc lagrange.cu -o lagrange
@@ -37,7 +38,8 @@ __global__ void lagrangeGPU(
     const float h,
     const float query_h,
     const int n,
-    float* lag
+    float* lag,
+    float* mean_lag_error
 )
 {
     __shared__ float thread_calcs[MAX_BLKSZ];
@@ -86,7 +88,47 @@ __global__ void lagrangeGPU(
 
     if(threadIdx.x == 0){
       lag[query_i] = blk_result;
+      float x = a + query_i * query_h;
+      *mean_lag_error += abs(U(x) - blk_result);
     } 
+}
+
+void save_results(
+    int slice_number,
+    int block_size,
+    int query_num,
+    double elapsed,
+    double mean_error,
+    const char* version
+)
+{
+    FILE *fp = fopen("result.csv", "a");
+
+    if (fp == NULL)
+    {
+        perror("Error opening file");
+        return;
+    }
+
+    fseek(fp, 0, SEEK_END);
+
+    if (ftell(fp) == 0)
+    {
+        fprintf(fp,
+            "slice_number,block_size,query_num,elapsed,mean_error,version\n");
+    }
+
+    fprintf(fp,
+        "%d,%d,,%d,%.6f,%.10e,%s\n",
+        block_size,
+        slice_number,
+        query_num,
+        elapsed,
+        mean_error,
+        version
+    );
+
+    fclose(fp);
 }
 
 void Get_args(
@@ -135,7 +177,8 @@ int main(int argc,char* argv[])
     float a = 0;
     float b = acos(-1.0);
     int input_flag = 1;
-    float* lag_res;
+    float* lag_res, lag_error;
+    float* mean_lag_error;
     cudaEvent_t start, stop;
     
     Get_args(argc, argv, slice_num, &input_flag, query_num);
@@ -150,6 +193,10 @@ int main(int argc,char* argv[])
 
     cudaMallocManaged(&lag_res, query_num * sizeof(float));
     cudaMemset(lag_res, 0, query_num * sizeof(float));
+    
+    cudaMallocManaged(&mean_lag_error, sizeof(float));
+    cudaMemset(mean_lag_error, 0, sizeof(float));
+
     /*
     query_num  → number of blocks 
     threads_per_block  → number of threads per block = blockDim.x
@@ -161,7 +208,7 @@ int main(int argc,char* argv[])
 
     cudaEventRecord(start);
 
-    lagrangeGPU<<<query_num, threads_per_block>>>(a, h, query_h, slice_num, lag_res);
+    lagrangeGPU<<<query_num, threads_per_block>>>(a, h, query_h, slice_num, lag_res, mean_lag_error);
 
     cudaEventRecord(stop);
 
@@ -179,6 +226,7 @@ int main(int argc,char* argv[])
                 << cudaGetErrorString(err) << std::endl;
         return 1;
     }
+    *mean_lag_error /= query_num;
 
     cudaEventElapsedTime(
     &milliseconds,
@@ -202,5 +250,6 @@ int main(int argc,char* argv[])
                 << cudaGetErrorString(err) << std::endl;
         return 1;
     }
+    save_results(slice_num, block_size, query_num, elapsed, *mean_lag_error, "CUDA");
     return 0;
 }
