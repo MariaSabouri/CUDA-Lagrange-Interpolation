@@ -1,4 +1,4 @@
-slice_number,block_size,query_num,elapsed,mean_error,version
+slice_number,block_size,query_num,elapsed(us),mean_error,version
 8,32,10000,7.8435201431e-04,4.8713943102e-08,CUDA
 8,32,100000,1.0546880076e-03,5.6932293546e-08,CUDA
 8,32,1000000,6.5540159121e-03,5.7507531181e-08,CUDA

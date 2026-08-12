@@ -115,7 +115,7 @@ void save_results(
     if (ftell(fp) == 0)
     {
         fprintf(fp,
-            "slice_number,block_size,query_num,elapsed,mean_error,version\n");
+            "slice_number,block_size,query_num,elapsed(us),mean_error,version\n");
     }
 
     fprintf(fp,
