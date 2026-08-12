@@ -119,9 +119,9 @@ void save_results(
     }
 
     fprintf(fp,
-        "%d,%d,,%d,%.6f,%.10e,%s\n",
-        block_size,
+        "%d,%d,%d,%.10e,%.10e,%s\n",
         slice_number,
+        block_size,
         query_num,
         elapsed,
         mean_error,
@@ -136,7 +136,8 @@ void Get_args(
     char* argv[],
     int& slice_num,
     int* input_flag,
-    int& query_num
+    int& query_num,
+    int& threads_per_block_query
 )
 {
     if(argc != 3)
@@ -148,7 +149,16 @@ void Get_args(
 
     slice_num = strtol(argv[1], NULL, 10);
     query_num = strtol(argv[2], NULL, 10);
-    
+
+    if (argc == 4)
+    {
+        threads_per_block_query = strtol(argv[3], NULL, 10);
+    }
+    else
+    {
+        threads_per_block_query = ((slice_num + 31) / 32) * 32;
+    }
+
     if(slice_num < 2 || slice_num > MAX_BLKSZ)
     {
         *input_flag = 0;
@@ -172,16 +182,16 @@ int main(int argc,char* argv[])
     std::cout << "Compute Capability: "
               << prop.major << "." << prop.minor << std::endl;
 
-    int slice_num, query_num;
+    int slice_num, query_num, threads_per_block;
     float h, query_h;
     float a = 0;
     float b = acos(-1.0);
     int input_flag = 1;
-    float* lag_res, lag_error;
+    float* lag_res;
     float* mean_lag_error;
     cudaEvent_t start, stop;
     
-    Get_args(argc, argv, slice_num, &input_flag, query_num);
+    Get_args(argc, argv, slice_num, &input_flag, query_num, threads_per_block);
     if(input_flag == 0)
     {
         return 1;
@@ -201,7 +211,6 @@ int main(int argc,char* argv[])
     query_num  → number of blocks 
     threads_per_block  → number of threads per block = blockDim.x
     */
-    int threads_per_block = ((slice_num + 31) / 32) * 32;
 
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -234,12 +243,12 @@ int main(int argc,char* argv[])
     stop
     );
     
-    for (int i = 0; i < query_num; i++)
-    {
-        printf("P(x[%d]) = %f\n", i, lag_res[i]);
-    }
+    // for (int i = 0; i < query_num; i++)
+    // {
+    //     printf("P(x[%d]) = %f\n", i, lag_res[i]);
+    // }
 
-    printf("CUDA kernel time: %f ms\n", milliseconds);
+    printf("CUDA kernel time: %.10e ms\n", milliseconds);
 
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
@@ -250,6 +259,6 @@ int main(int argc,char* argv[])
                 << cudaGetErrorString(err) << std::endl;
         return 1;
     }
-    save_results(slice_num, block_size, query_num, elapsed, *mean_lag_error, "CUDA");
+    save_results(slice_num, threads_per_block, query_num, milliseconds/1000, *mean_lag_error, "CUDA");
     return 0;
 }
