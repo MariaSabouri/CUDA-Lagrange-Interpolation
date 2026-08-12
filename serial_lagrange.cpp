@@ -31,13 +31,13 @@ void save_results(
     if (ftell(fp) == 0)
     {
         fprintf(fp,
-            "slice_number,block_size,query_num,elapsed,mean_error,version\n");
+            "slice_number,block_size,query_num,elapsed(us),mean_error,version\n");
     }
 
     fprintf(fp,
-        "%d,%d,,%d,%.6f,%.10e,%s\n",
-        block_size,
+        "%d,%d,%d,%.10e,%.10e,%s\n",
         slice_number,
+        block_size,
         query_num,
         elapsed,
         mean_error,
@@ -117,7 +117,7 @@ void lagrange(
             float y_i = U(x_i);
             result[q] += y_i * basis;
         }
-        mean_lag_error += abs(result[q] - U(x_value));
+        mean_lag_error += fabsf(result[q] - U(x_value));
     }
     mean_lag_error /= query_n;
 }
@@ -128,7 +128,7 @@ int main(int argc,char* argv[])
     float h, query_h;
     float a = 0;
     float b = acos(-1.0);
-    float mean_lag_error = 0;
+    float mean_lag_error = 0.0f;
     int input_flag = 1;
 
     Get_args(argc, argv, slice_num, &input_flag, query_num);
@@ -148,12 +148,12 @@ int main(int argc,char* argv[])
 
     std::chrono::duration<double, std::micro> elapsed = end - start;
 
-    for (int i = 0; i < query_num; ++i)
-    {
-        printf("lag[%d] = %f\n",i,lag_res[i]);
-    }
+    // for (int i = 0; i < query_num; ++i)
+    // {
+    //     printf("lag[%d] = %f\n",i,lag_res[i]);
+    // }
     printf("Execution time: %f us\n", elapsed.count());
-    printf("mean_error: %f \n", mean_lag_error);
+    printf("mean_error: %.12f \n", mean_lag_error);
 
     save_results(
     slice_num,
