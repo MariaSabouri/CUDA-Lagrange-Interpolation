@@ -39,7 +39,7 @@ __global__ void lagrangeGPU(
     const float query_h,
     const int n,
     float* lag,
-    float* mean_lag_error
+    float* mean_lag_error_arr
 )
 {
     __shared__ float thread_calcs[MAX_BLKSZ];
@@ -51,7 +51,7 @@ __global__ void lagrangeGPU(
     int my_lane = threadIdx.x % warpSize;
 
     float* shared_vals = thread_calcs + my_warp * warpSize;
-    float blk_result = 0.0;
+    float blk_result = 0.0f;
 
     shared_vals[my_lane] = 0.0f;
 
@@ -89,8 +89,44 @@ __global__ void lagrangeGPU(
     if(threadIdx.x == 0){
       lag[query_i] = blk_result;
       float x = a + query_i * query_h;
-      *mean_lag_error += abs(U(x) - blk_result);
+      mean_lag_error_arr[query_i] += fabs(U(x) - blk_result);
     } 
+}
+
+__global__ void mean_error_calc(
+    const int n,
+    float* mean_lag_error_arr,
+    float* mean_lag_error
+)
+{
+    __shared__ float thread_calcs[MAX_BLKSZ];
+    __shared__ float warp_sum_arr[WARP_SZ];
+
+    int my_i = blockIdx.x * blockDim.x + threadIdx.x;
+    int my_warp = threadIdx.x / warpSize;
+    int my_lane = threadIdx.x % warpSize;
+
+    float* shared_vals = thread_calcs + my_warp * warpSize;
+    float blk_result = 0.0f;
+
+    shared_vals[my_lane] = 0.0f;
+    if (my_i < n)
+    {
+        shared_vals[my_lane] = mean_lag_error_arr[my_i];
+    }
+    float my_result = Shared_mem_sum(shared_vals);
+    if(my_lane == 0) warp_sum_arr[my_warp] = my_result;
+    __syncthreads();
+
+    if(my_warp == 0)
+    {
+        if(threadIdx.x >= (blockDim.x + warpSize - 1) / warpSize)
+            warp_sum_arr[threadIdx.x] = 0.0;
+        blk_result = Shared_mem_sum(warp_sum_arr); 
+    }
+    if(threadIdx.x == 0){
+        atomicAdd(mean_lag_error, blk_result);
+    }
 }
 
 void save_results(
@@ -140,7 +176,7 @@ void Get_args(
     int& threads_per_block_query
 )
 {
-    if(argc != 3)
+    if(argc != 3 && argc != 4)
     {
         *input_flag = 0;
         printf("An error message\n");
@@ -188,6 +224,7 @@ int main(int argc,char* argv[])
     float b = acos(-1.0);
     int input_flag = 1;
     float* lag_res;
+    float* mean_lag_error_arr;
     float* mean_lag_error;
     cudaEvent_t start, stop;
     
@@ -204,8 +241,8 @@ int main(int argc,char* argv[])
     cudaMallocManaged(&lag_res, query_num * sizeof(float));
     cudaMemset(lag_res, 0, query_num * sizeof(float));
     
-    cudaMallocManaged(&mean_lag_error, sizeof(float));
-    cudaMemset(mean_lag_error, 0, sizeof(float));
+    cudaMallocManaged(&mean_lag_error_arr, query_num * sizeof(float));
+    cudaMemset(mean_lag_error_arr, 0, query_num * sizeof(float));
 
     /*
     query_num  → number of blocks 
@@ -214,34 +251,46 @@ int main(int argc,char* argv[])
 
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-
     cudaEventRecord(start);
-
-    lagrangeGPU<<<query_num, threads_per_block>>>(a, h, query_h, slice_num, lag_res, mean_lag_error);
-
+    lagrangeGPU<<<query_num, threads_per_block>>>(a, h, query_h, slice_num, lag_res, mean_lag_error_arr);
     cudaEventRecord(stop);
-
     cudaEventSynchronize(stop);
     
-    float milliseconds;
-    
     cudaError_t err = cudaGetLastError();
-    
     err = cudaDeviceSynchronize();
-    
     if (err != cudaSuccess)
     {
         std::cerr << "Kernel launch error: "
                 << cudaGetErrorString(err) << std::endl;
         return 1;
     }
-    *mean_lag_error /= query_num;
 
+    float milliseconds;
     cudaEventElapsedTime(
     &milliseconds,
     start,
     stop
     );
+    
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
+    cudaMallocManaged(&mean_lag_error, sizeof(float));
+    cudaMemset(mean_lag_error, 0, sizeof(float));
+
+    int error_threads_per_block = 256;
+    int error_blocks = (query_num + error_threads_per_block - 1) / error_threads_per_block;   
+    mean_error_calc<<<error_blocks, error_threads_per_block>>>(query_num, mean_lag_error_arr, mean_lag_error);
+    err = cudaDeviceSynchronize();
+    if (err != cudaSuccess)
+    {
+        std::cerr << "Kernel launch error: "
+                << cudaGetErrorString(err) << std::endl;
+        return 1;
+    }
+
+    *mean_lag_error /= query_num;
+
     
     // for (int i = 0; i < query_num; i++)
     // {
@@ -249,16 +298,8 @@ int main(int argc,char* argv[])
     // }
 
     printf("CUDA kernel time: %.10e ms\n", milliseconds);
-
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-
-    if (err != cudaSuccess)
-    {
-        std::cerr << "Kernel execution error: "
-                << cudaGetErrorString(err) << std::endl;
-        return 1;
-    }
-    save_results(slice_num, threads_per_block, query_num, milliseconds/1000, *mean_lag_error, "CUDA");
+    printf("Mean absolute error = %.10e\n", *mean_lag_error);
+    save_results(slice_num, threads_per_block, query_num, milliseconds * 1000, *mean_lag_error, "CUDA");
+    
     return 0;
 }

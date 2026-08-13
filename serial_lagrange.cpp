@@ -102,7 +102,7 @@ void lagrange(
         float x_value = a + q * query_h; 
         for (int i = 0; i < n; ++i)
         {
-            double basis = 1.0;
+            float basis = 1.0f;
             float x_i = a + i * h;
 
             for (int j = 0; j < n; ++j)
