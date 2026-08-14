@@ -227,37 +227,6 @@ can execute concurrently on an SM.
 Therefore, selecting a suitable block size requires a balance between
 parallelism and GPU resource usage.
 
-## Experimental Plots
-
-The report includes plots for:
-
-### Mean Error
-
--   X-axis: `query_num`
--   Y-axis: `mean_error`
--   Curves: `slice = 8, 16, 32, 64`
-
-### Execution Time
-
--   X-axis: `query_num`
--   Y-axis: `Elapsed Time (us)`
--   Curves: `slice = 8, 16, 32, 64`
-
-### Speedup
-
--   X-axis: `query_num`
--   Y-axis: `Speedup`
--   Curves: `slice = 8, 16, 32, 64`
-
-### Block Size
-
--   X-axis: `block_size`
--   Y-axis: `Elapsed Time (us)`
--   Block sizes: `64, 128, 256, 512`
--   Curves: different `slice_number` values
--   Separate plots are used for `query_num = 10,000`, `100,000`, and
-    `1,000,000`.
-
 ## Conclusion
 
 The experiments show that the CUDA implementation provides a significant
